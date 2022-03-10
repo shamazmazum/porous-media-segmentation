@@ -6,7 +6,7 @@
                     (:float :float-features))
   (:export #:label
            #:segments-location
-           #:pair
+           #:pair #:circle #:circle-center #:circle-radius
            ;; For testing
            #:smallest-enclosing-circle
-           #:naïve-smallest-enclosing-circle-radius))
+           #:naïve-smallest-enclosing-circle))

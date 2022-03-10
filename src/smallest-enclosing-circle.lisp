@@ -1,11 +1,15 @@
 (in-package :pm-segmentation)
 (deftype pair (type) `(cons ,type ,type))
 
+(sera:defconstructor circle
+  (center (pair single-float))
+  (radius (single-float 0f0)))
+
 (sera:-> triangle=>circumscribed-circle
          ((pair single-float)
           (pair single-float)
           (pair single-float))
-         (values (pair single-float) single-float &optional))
+         (values circle &optional))
 (defun triangle=>circumscribed-circle (a b c)
   (declare (type (pair single-float) a b c)
            (optimize (speed 3)))
@@ -27,7 +31,7 @@
                    (* cx (+ (expt bx 2) (expt by 2))))
                 d)))
 
-    (values
+    (circle
      (cons (+ ax ux)
            (+ ay uy))
      (sqrt (+ (expt ux 2)
@@ -36,7 +40,7 @@
 (sera:-> segment=>circumscribed-circle
          ((pair single-float)
           (pair single-float))
-         (values (pair single-float) single-float &optional))
+         (values circle &optional))
 (defun segment=>circumscribed-circle (a b)
   (declare (type (pair single-float) a b)
            (optimize (speed 3)))
@@ -45,60 +49,80 @@
         (bx (car b))
         (by (cdr b)))
 
-    (values
+    (circle
      (cons (/ (+ ax bx) 2)
            (/ (+ ay by) 2))
      (sqrt (+ (expt (/ (- ax bx) 2) 2)
               (expt (/ (- ay by) 2) 2))))))
 
+(sera:-> squared-distance
+         ((pair single-float)
+          (pair single-float))
+         (values (single-float 0f0) &optional))
+(defun squared-distance (p1 p2)
+  (declare (optimize (speed 3))
+           (type (pair single-float) p1 p2))
+  (let ((x1 (car p1))
+        (y1 (cdr p1))
+        (x2 (car p2))
+        (y2 (cdr p2)))
+    (+ (expt (- x1 x2) 2)
+       (expt (- y1 y2) 2))))
+
 (sera:-> point-in-circle-p
          ((pair single-float)
-          (pair single-float)
-          single-float)
+          circle)
          (values boolean &optional))
-(defun point-in-circle-p (point center radius)
+(defun point-in-circle-p (point circle)
   (declare (optimize (speed 3))
-           (type (pair single-float) point center)
-           (type single-float radius))
-  (let ((px (car point))
-        (py (cdr point))
-        (cx (car center))
-        (cy (cdr center)))
+           (type (pair single-float) point)
+           (type circle circle))
+  (multiple-value-bind (center radius)
+      (sera:deconstruct circle)
+    (declare (type single-float radius))
+    (< (squared-distance center point)
+       (+ (expt radius 2) 1f-6))))
 
-    (< (+ (expt (- px cx) 2)
-          (expt (- py cy) 2))
-       (+ (expt radius 2) 1f-8))))
+(defmacro with-multi-mode ((mode) &body body)
+  `(let ((snakes:*snakes-multi-mode* ,mode))
+     ,@body))
 
-(sera:-> naïve-smallest-enclosing-circle-radius
-         (list) (values single-float &optional))
-(defun naïve-smallest-enclosing-circle-radius (points)
+(defun foldl (function init-value generator)
+  (declare (optimize (speed 3))
+           (type function function generator))
+  (labels ((foldl% (acc)
+             (let ((value (funcall generator)))
+               (if (eq value 'snakes:generator-stop)
+                   acc
+                   (foldl% (funcall function acc value))))))
+    (foldl% init-value)))
+
+(sera:-> naïve-smallest-enclosing-circle
+         (list) (values circle &optional))
+(defun naïve-smallest-enclosing-circle (points)
   (declare (optimize (speed 3)))
-  (let ((combinations-2 (snakes:combinations points 2))
-        (combinations-3 (snakes:combinations points 3)))
-    (declare (type function combinations-2 combinations-3))
-    ;; Two points on the boundary of the smallest circle
-    (min
-     (loop
-        for (p1 p2) = (multiple-value-list (funcall combinations-2))
-        until (eq p1 'snakes:generator-stop) minimize
-          (multiple-value-bind (center radius)
-              (segment=>circumscribed-circle p1 p2)
-            (if (every (lambda (point)
-                         (point-in-circle-p point center radius))
-                       (set-difference points (list p1 p2) :test #'equal))
-                radius float:single-float-positive-infinity))
-        single-float)
-     ;; Three or more points on the boundary of the smallest circle
-     (loop
-        for (p1 p2 p3) = (multiple-value-list (funcall combinations-3))
-        until (eq p1 'snakes:generator-stop) minimize
-          (multiple-value-bind (center radius)
-              (triangle=>circumscribed-circle p1 p2 p3)
-            (if (every (lambda (point)
-                         (point-in-circle-p point center radius))
-                       (set-difference points (list p1 p2 p3) :test #'equal))
-                radius float:single-float-positive-infinity))
-          single-float))))
+  (let ((biggest-circle (circle (cons 0.0 0.0)
+                                float:single-float-positive-infinity)))
+    (labels ((accumulate-circle (smallest-circle boundary-points)
+               (declare (type list boundary-points))
+               (let ((circle (ecase (length boundary-points)
+                               (2 (apply #'segment=>circumscribed-circle boundary-points))
+                               (3 (apply #'triangle=>circumscribed-circle boundary-points)))))
+                 (if (and (every (lambda (point)
+                                   (point-in-circle-p point circle))
+                                 (set-difference points boundary-points :test #'equal))
+                          (< (circle-radius circle)
+                             (circle-radius smallest-circle)))
+                     circle smallest-circle)))
+             (smallest-circle (n-boundary-points)
+               (foldl #'accumulate-circle biggest-circle
+                    (with-multi-mode (:list)
+                      (snakes:combinations points n-boundary-points)))))
+      (let ((2-boundary-points (smallest-circle 2))
+            (3-boundary-points (smallest-circle 3)))
+        (if (< (circle-radius 2-boundary-points)
+               (circle-radius 3-boundary-points))
+            2-boundary-points 3-boundary-points)))))
 
 (sera:-> random-permutation (list) (values list &optional))
 (defun random-permutation (list)
@@ -117,25 +141,24 @@
 ;; Implementation of Welzl's algorithm (NB: Uses stack!)
 (sera:-> smallest-enclosing-circle
          (list)
-         (values (pair single-float) single-float &optional))
+         (values circle &optional))
 (defun smallest-enclosing-circle (points)
   "Return a center and a radius of the smalled enclosing circle for a
 list of points. Each point is a cons of two single-float numbers."
   (labels ((trivial (boundary)
              (let ((length (length boundary)))
                (ecase length
-                 (0 (values (cons 0.0 0.0) 0.0))
-                 (1 (values (car boundary) 0.0))
+                 (0 (circle (cons 0.0 0.0) 0.0))
+                 (1 (circle (car boundary) 0.0))
                  (2 (apply #'segment=>circumscribed-circle boundary))
                  (3 (apply #'triangle=>circumscribed-circle boundary)))))
            (scr% (points boundary)
              (if (or (null points)
                      (= (length boundary) 3))
                  (trivial boundary)
-                 (let ((first (first points)))
-                   (multiple-value-bind (center radius)
-                       (scr% (cdr points) boundary)
-                     (if (point-in-circle-p first center radius)
-                         (values center radius)
-                         (scr% (cdr points) (cons first boundary))))))))
+                 (let ((first (first points))
+                       (circle (scr% (cdr points) boundary)))
+                   (if (point-in-circle-p first circle)
+                       circle
+                       (scr% (cdr points) (cons first boundary)))))))
     (scr% (random-permutation points) nil)))

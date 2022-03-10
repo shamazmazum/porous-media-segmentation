@@ -9,6 +9,9 @@
     (explain! status)
     (results-status status)))
 
+(defun ≈ (x1 x2 &optional (tol 5f-4))
+    (< (abs (- x1 x2)) tol))
+
 (def-suite pm-segmentation :description "Test segmentation")
 (in-suite pm-segmentation)
 
@@ -31,19 +34,22 @@
                        (cons (- (random 200.0) 100.0)
                              (- (random 200.0) 100.0)))
      do
-       (is-true
-        (< (abs (- (nth-value 1 (pm-segmentation:smallest-enclosing-circle points))
-                   (pm-segmentation:naïve-smallest-enclosing-circle-radius points)))
-           5f-4))))
+       (multiple-value-bind (center1 radius1)
+           (serapeum:deconstruct (pm-segmentation:smallest-enclosing-circle points))
+         (multiple-value-bind (center2 radius2)
+             (serapeum:deconstruct (pm-segmentation:naïve-smallest-enclosing-circle points))
+           (is (≈ radius1 radius2))
+           (is (≈ (car center1) (car center2)))
+           (is (≈ (cdr center1) (cdr center2)))))))
 
 (test size-extraction
-  (let* ((segment-sizes (nth-value 
-                         1 (pm-segmentation:segments-location
-                            (pm-segmentation:label
-                             (imago:read-image *disks-image*)))))
+  (let* ((segment-sizes (pm-segmentation:segments-location
+                         (pm-segmentation:label
+                          (imago:read-image *disks-image*))))
          (first-segment-size (aref segment-sizes 0)))
     (is-true
      (every
       (lambda (rel-size) (< 0.9 rel-size 1.1))
       (aops:vectorize* 'single-float (segment-sizes)
-        (/ segment-sizes first-segment-size))))))
+        (/ (pm-segmentation:circle-radius segment-sizes)
+           (pm-segmentation:circle-radius first-segment-size)))))))
