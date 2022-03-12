@@ -6,6 +6,7 @@
   :version "0.1"
   :depends-on (:array-operations
                :cl-watershed
+               :vp-trees
                :imago
                :snakes
                :float-features
@@ -14,8 +15,8 @@
   :serial t
   :pathname "src/"
   :components ((:file "package")
-               (:file "segmentation")
                (:file "smallest-enclosing-circle")
+               (:file "segmentation")
                (:file "segments-location"))
   :in-order-to ((test-op (load-op "porous-media-segmentation/tests")))
   :perform (test-op (op system)
