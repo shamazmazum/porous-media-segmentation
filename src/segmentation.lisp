@@ -57,7 +57,7 @@
              (pruned-list
               (reduce
                (lambda (acc peak)
-                 (let* ((neighbors (vp-trees:search-close
+                 (let* ((neighbors (vp-trees:items-in-ball
                                     vp-tree peak
                                     (aref edt (car peak) (cdr peak))
                                     #'squared-distance
