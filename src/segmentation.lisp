@@ -103,10 +103,13 @@ avoid oversegmentation (experimental feature)."
            (optimize (speed 3)))
   (let* ((pixels (imago:image-pixels image))
          (inverted (aops:vectorize* 'bit (pixels) (- 1 pixels))) ; Invert image
+         (edt (imago:distance-transform
+               (make-instance 'imago:binary-image :pixels inverted)
+               :type :edt))
          (edt (cl-watershed:convolve
-               (imago:distance-transform
-                (make-instance 'imago:binary-image :pixels inverted)
-                :type :edt)
+               (aops:vectorize* 'single-float
+                   (edt)
+                 (float edt))
                (make-gaussian-filter sigma))) ; Calculate EDT and apply blur
          (dilation (cl-watershed:convolve edt (make-disk radius) #'max))
          (peaks-image
